@@ -1,0 +1,21 @@
+version: '3'
+services:
+  balancerdevcontainer:
+    container_name: balancerdevcontainer
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - USER=$USER
+        - UID=$UID
+    image: balancerdevimage
+    user: $UID
+    volumes:
+      - ..:/home/$USER/workspace/balancer
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    tty: true
+    stdin_open: true
+    working_dir: /home/$USER/workspace/balancer
+    environment:
+      - DISPLAY
+      - MPLBACKEND=TKAgg
