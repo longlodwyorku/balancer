@@ -8,9 +8,9 @@ URL:            https://github.com/longlodwyorku/balancer
 Source0:        %URL/archive/refs/tags/v%{version}.tar.gz
 
 BuildRequires:  g++ 
-BuildRequires:  libmonitor-devel-0-1.el9.x86_64
+BuildRequires:  libmonitor-devel
 BuildRequires:  make
-Requires:       libmonitor-0-1.el9.x86_64
+Requires:       libmonitor
 
 %description
 Balancer is a package containing a reverse proxy / load balancer and a monitoring service. The reverse proxy / load balancer is a simple server that listens for incoming requests and forwards them to a backend server. The monitoring service is a simple server that broadcast the CPU and memory usage of backend server to the load balancer. The broadcasted information will be used for load balancing.
