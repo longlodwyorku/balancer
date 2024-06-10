@@ -41,5 +41,7 @@ install_proxy: $(BIN)/proxy_server sh/proxy.sh configs/proxy.conf serv/proxy.ser
 	install configs/proxy.conf $(DESTDIR)/etc/balancer
 	install serv/balancer-proxy.service $(DESTDIR)/usr/lib/systemd/system
 
+install: install_proxy install_monitor
+
 clean:
 	rm -rf obj/* bin/* shared/*
