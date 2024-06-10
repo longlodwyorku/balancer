@@ -1,52 +1,35 @@
 #pragma once
-#include "sync_stack.hpp"
 #include <cstddef>
+#include <sys/types.h>
+#include <vector>
+#include <unordered_map>
 #include <cstdint>
-#include <atomic>
 
 struct connection {
-  static constexpr uint8_t READ_PIPE = 1;
-  static constexpr uint8_t WRITE_PIPE = 2;
-  static constexpr uint8_t REVERSE_DIRECTION = 4;
-  static constexpr uint8_t READY = 8;
+  ssize_t bytes_in_pipe;
+  int pipes[2];
   int server;
   int client;
-  int pipe0;
-  int pipe1;
-  uint8_t state;
+  int ep;
 
-  connection(int client, int server, int pipe0, int pipe1);
-  connection() = default;
-  void close() const;
-  void flip_read_pipe();
-  void flip_write_pipe();
-  void flip_reverse_direction();
-  void flip_ready();
-  bool is_read_pipe() const;
-  bool is_write_pipe() const;
-  bool is_reverse_direction() const;
-  bool is_ready() const;
+  void clean_up() const;
+  int write(int fd);
+  int read(int fd);
 };
 
 class connections_manager {
-  struct entry {
-    int key;
-    size_t conn_index;
-    entry() = default;
-    entry(int key, size_t conn_index)
-      : key(key), conn_index(conn_index) {}
-  };
-  sync_stack<size_t> empty_slots_stack;
-  connection * connections;
-  entry * entries;
-  size_t * empty_slots;
-  std::atomic_size_t number;
-  const size_t capacity;
+  std::vector<size_t> empty_slots;
+  std::vector<connection> connections;
+  std::unordered_map<int, size_t> fd_to_index;
+  const int ep;
 public:
-  connections_manager(size_t cap);
+  connections_manager(int& ep);
   ~connections_manager();
-  bool add(int client, int server, int pipe0, int pipe1);
+  void add(const connection& conn);
   void remove(int fd);
-  connection* get(int fd) const;
+  connection* get(int fd);
 };
 
+int epoll_add(int ep, int fd, uint32_t event);
+int epoll_del(int ep, int fd);
+int epoll_mod(int ep, int fd, uint32_t event);

@@ -1,110 +1,134 @@
 #include "../headers/connection.hpp"
+#include <cerrno>
 #include <cstddef>
+#include <cstdio>
+#include <fcntl.h>
+#include <sys/epoll.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-connection::connection(int client, int server, int pipe0, int pipe1)
-  : client(client), server(server), pipe0(pipe0), pipe1(pipe1), state(0) {}
+static constexpr size_t CONNECTION_BUFFER_SIZE = 65536;
 
-void connection::close() const {
+void connection::clean_up() const {
+  epoll_del(ep, server);
+  epoll_del(ep, client);
   ::close(client);
   ::close(server);
-  ::close(pipe0);
-  ::close(pipe1);
+  ::close(pipes[0]);
+  ::close(pipes[1]);
 }
 
-void connection::flip_read_pipe() {
-  state ^= connection::READ_PIPE;
+int connection::write(int fd) {
+  int peer;
+  if (fd == server) {
+    peer = client;
+  }
+  else if (fd == client) {
+    peer = server;
+  }
+  else {
+    return -2;
+  }
+
+  ssize_t r; 
+  while(bytes_in_pipe && (r = ::splice(pipes[0], nullptr, fd, nullptr, bytes_in_pipe, SPLICE_F_NONBLOCK | SPLICE_F_MORE)) > 0) {
+    bytes_in_pipe -= r;
+  }
+
+  if (bytes_in_pipe) {
+    return fd;
+  }
+  if (epoll_mod(ep, peer, EPOLLIN | EPOLLRDHUP) < 0 || epoll_mod(ep, fd, EPOLLIN | EPOLLRDHUP) < 0) {
+    perror(nullptr);
+    return -1;
+  }
+  return peer;
 }
 
-void connection::flip_write_pipe() {
-  state ^= connection::WRITE_PIPE;
+int connection::read(int fd) {
+  int peer;
+  if (fd == server) {
+    peer = client;
+  }
+  else if (fd == client) {
+    peer = server;
+  }
+  else {
+    return -2;
+  }
+  ssize_t s = ::splice(fd, nullptr, pipes[1], nullptr, CONNECTION_BUFFER_SIZE, SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+  if (s < 0) {
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+      return fd;
+    }
+    perror(nullptr);
+    return -1;
+  }
+  bytes_in_pipe = s;
+  if (epoll_mod(ep, fd, EPOLLRDHUP) < 0 || epoll_mod(ep, peer, EPOLLET | EPOLLOUT) < 0) {
+    perror(nullptr);
+    return -1;
+  }
+  return peer;
 }
 
-void connection::flip_reverse_direction() {
-  state ^= connection::REVERSE_DIRECTION;
-}
-
-void connection::flip_ready() {
-  state ^= connection::READY;
-}
-
-bool connection::is_read_pipe() const {
-  return state & connection::READ_PIPE;
-}
-
-bool connection::is_write_pipe() const {
-  return state & connection::WRITE_PIPE;
-}
-
-bool connection::is_reverse_direction() const {
-  return state & connection::REVERSE_DIRECTION;
-}
-
-bool connection::is_ready() const {
-  return state & connection::READY;
-}
-
-connections_manager::connections_manager(size_t cap)
-  : connections(new connection[cap]), entries(new entry[cap]), empty_slots(new size_t[cap]), number(0), capacity(cap) {
-  empty_slots_stack = sync_stack<size_t>(empty_slots, 0, capacity);
-  entries[0].key = -1;
-}
+connections_manager::connections_manager(int& ep)
+  :ep(ep) {}
 
 connections_manager::~connections_manager() {
-  for (size_t k = 0, n = 0; k < capacity || n == number.load(); ++k) {
-    if (entries[k].key == k) {
-      connections[entries[k].conn_index].close();
-      ++n;
-    }
+  for (auto& conn : connections) {
+    conn.clean_up();
   }
-  delete [] connections;
-  delete [] entries;
-  delete [] empty_slots;
 }
 
-bool connections_manager::add(int client, int server, int pipe0, int pipe1) {
-  size_t current_number = number.load();
-  if (current_number == capacity) {
-    return false;
+void connections_manager::add(const connection& conn) {
+  size_t current_number = connections.size();
+  if (!empty_slots.empty()) {
+    current_number = empty_slots.back();
+    empty_slots.pop_back();
+    connections[current_number] = conn;
   }
-  while (!number.compare_exchange_strong(current_number, current_number + 1)) {
-    std::this_thread::yield();
-    current_number = number.load();
-    if (current_number == capacity) {
-      return false;
-    }
+  else {
+    connections.push_back(conn);
   }
-  empty_slots_stack.pop(&current_number);
-  connections[current_number] = connection(client, server, pipe0, pipe1);
-  entries[client] = entry(client, current_number);
-  entries[server] = entry(server, current_number);
-  entries[pipe0] = entry(pipe0, current_number);
-  entries[pipe1] = entry(pipe1, current_number);
-  return true;
+  fd_to_index[conn.server] = current_number;
+  fd_to_index[conn.client] = current_number;
 }
 
 void connections_manager::remove(int fd) {
-  if (entries[fd].key != fd) {
+  if (fd_to_index.find(fd) == fd_to_index.end()) {
     return;
   }
-  size_t last = number.load();
-  while (!number.compare_exchange_strong(last, last - 1)) {
-    std::this_thread::yield();
-    last = number.load();
-  }
-  size_t conn_index = entries[fd].conn_index;
+  size_t conn_index = fd_to_index[fd];
   connection& removed_conn = connections[conn_index];
-  removed_conn.close();
-  entries[removed_conn.server].key = 0;
-  entries[removed_conn.client].key = 0;
-  entries[removed_conn.pipe0].key = 0;
-  entries[removed_conn.pipe1].key = 0;
-  empty_slots_stack.push(conn_index);
+  removed_conn.clean_up();
+  fd_to_index.erase(removed_conn.server);
+  fd_to_index.erase(removed_conn.client);
+  empty_slots.push_back(conn_index);
 }
 
-connection* connections_manager::get(int fd) const {
-  if (fd >= capacity || entries[fd].key != fd) {
+connection* connections_manager::get(int fd) {
+  if (fd_to_index.find(fd) == fd_to_index.end()) {
     return nullptr;
   }
-  return connections + entries[fd].conn_index;
+  size_t conn_index = fd_to_index.at(fd);
+  return &(connections[conn_index]);
+}
+
+int epoll_add(int ep, int fd, uint32_t event) {
+  epoll_event ev;
+  ev.events = event;
+  ev.data.fd = fd;
+  return epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev);
+}
+
+int epoll_del(int ep, int fd) {
+  return epoll_ctl(ep, EPOLL_CTL_DEL, fd, nullptr);
+}
+
+int epoll_mod(int ep, int fd, uint32_t event) {
+  epoll_event ev;
+  ev.events = event;
+  ev.data.fd = fd;
+  return epoll_ctl(ep, EPOLL_CTL_MOD, fd, &ev);
 }
