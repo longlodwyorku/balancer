@@ -1,0 +1,4 @@
+<max_connections>
+<listen_ip> <listen_port>
+<server_0_ip> <server_0_port> <server_0_monitor_ip> <server_0_monitor_port>
+<server_n_ip> <server_n_port> <server_r_monitor_ip> <server_n_monitor_port>

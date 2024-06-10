@@ -1,0 +1,13 @@
+[Unit]
+Description=balancer monitor service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+Restart=always
+RestartSec=2
+ExecStart=/usr/bin/balancer/monitor.sh
+
+[Install]
+WantedBy=multi-user.target
