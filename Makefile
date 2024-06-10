@@ -27,14 +27,14 @@ $(OBJ)/worker.o: src/worker.cpp headers/worker.hpp headers/sync_queue.hpp header
 	mkdir -p obj
 	$(CC) $(FLAGS) -c -o obj/worker.o src/worker.cpp
 
-install_monitor: $(BIN)/monitor_server sh/monitor.sh configs/monitor.conf serv/monitor.service
+install_monitor: $(BIN)/monitor_server sh/monitor.sh configs/monitor.conf serv/balancer-monitor.service
 	mkdir -p $(DESTDIR)/usr/bin/balancer $(DESTDIR)/etc/balancer $(DESTDIR)/usr/lib/systemd/system
 	install $< $(DESTDIR)/usr/bin/balancer
 	install sh/monitor.sh $(DESTDIR)/usr/bin/balancer
 	install configs/monitor.conf $(DESTDIR)/etc/balancer
 	install serv/balancer-monitor.service $(DESTDIR)/usr/lib/systemd/system
 
-install_proxy: $(BIN)/proxy_server sh/proxy.sh configs/proxy.conf serv/proxy.service
+install_proxy: $(BIN)/proxy_server sh/proxy.sh configs/proxy.conf serv/balancer-proxy.service
 	mkdir -p $(DESTDIR)/usr/bin/balancer $(DESTDIR)/etc/balancer $(DESTDIR)/usr/lib/systemd/system
 	install $< $(DESTDIR)/usr/bin/balancer
 	install sh/proxy.sh $(DESTDIR)/usr/bin/balancer
