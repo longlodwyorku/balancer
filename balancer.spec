@@ -50,14 +50,14 @@ rm -rf $RPM_BUILD_ROOT
 %license LICENSE
 
 %files proxy
-%{_bindir}/balancer/proxy.sh
-%{_bindir}/balancer/proxy_server
+%{_bindir}/balancer-proxy.sh
+%{_bindir}/balancer-proxy
 %{_sysconfdir}/balancer/proxy.conf
 %{_exec_prefix}/lib/systemd/system/balancer-proxy.service
 
 %files monitor
-%{_bindir}/balancer/monitor.sh
-%{_bindir}/balancer/monitor_server
+%{_bindir}/balancer-monitor.sh
+%{_bindir}/balancer-monitor
 %{_sysconfdir}/balancer/monitor.conf
 %{_exec_prefix}/lib/systemd/system/balancer-monitor.service
 
