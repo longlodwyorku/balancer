@@ -5,27 +5,27 @@ BIN = bin
 
 $(OBJ)/balancer-monitor.o: src/balancer-monitor.cpp headers/endian_convert.hpp
 	mkdir -p obj
-	$(CC) $(FLAGS) -c -o obj/monitor.o src/monitor.cpp
+	$(CC) $(FLAGS) -c -o $@ $<
 
 $(BIN)/balancer-monitor: $(OBJ)/balancer-monitor.o
 	mkdir -p bin
-	$(CC) $(FLAGS) -lmonitor -o bin/monitor $^
+	$(CC) $(FLAGS) -lmonitor -o $@ $^
 
 $(BIN)/balancer-proxy: $(OBJ)/worker.o $(OBJ)/balancer-proxy.o $(OBJ)/connection.o
 	mkdir -p bin
-	$(CC) $(FLAGS) -lpthread -o bin/proxy $^
+	$(CC) $(FLAGS) -lpthread -o $@ $^
 
 $(OBJ)/balancer-proxy.o: src/balancer-proxy.cpp headers/endian_convert.hpp headers/worker.hpp
 	mkdir -p obj
-	$(CC) $(FLAGS) -c -o obj/proxy.o src/proxy.cpp
+	$(CC) $(FLAGS) -c -o $@ $<
 
 $(OBJ)/connection.o: src/connection.cpp headers/connection.hpp
 	mkdir -p obj
-	$(CC) $(FLAGS) -c -o obj/connection.o src/connection.cpp
+	$(CC) $(FLAGS) -c -o $@ $<
 
 $(OBJ)/worker.o: src/worker.cpp headers/worker.hpp headers/sync_queue.hpp headers/connection.hpp
 	mkdir -p obj
-	$(CC) $(FLAGS) -c -o obj/worker.o src/worker.cpp
+	$(CC) $(FLAGS) -c -o $@ $<
 
 install_monitor: $(BIN)/monitor sh/balancer-monitor.sh configs/monitor.conf serv/balancer-monitor.service
 	mkdir -p $(DESTDIR)/usr/bin/ $(DESTDIR)/etc/balancer $(DESTDIR)/usr/lib/systemd/system
