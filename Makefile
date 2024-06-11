@@ -27,21 +27,39 @@ $(OBJ)/worker.o: src/worker.cpp headers/worker.hpp headers/sync_queue.hpp header
 	mkdir -p obj
 	$(CC) $(FLAGS) -c -o $@ $<
 
-install_monitor: $(BIN)/monitor sh/balancer-monitor.sh configs/monitor.conf serv/balancer-monitor.service
-	mkdir -p $(DESTDIR)/usr/bin/ $(DESTDIR)/etc/balancer $(DESTDIR)/usr/lib/systemd/system
+install_balancer-monitor.sh: sh/balancer-monitor.sh
+	mkdir -p $(DESTDIR)/usr/bin
 	install $< $(DESTDIR)/usr/bin/
-	install sh/balancer-monitor.sh $(DESTDIR)/usr/bin/
-	install configs/monitor.conf $(DESTDIR)/etc/balancer
-	install serv/balancer-monitor.service $(DESTDIR)/usr/lib/systemd/system
 
-install_proxy: $(BIN)/proxy sh/balancer-proxy.sh configs/proxy.conf serv/balancer-proxy.service
-	mkdir -p $(DESTDIR)/usr/bin/ $(DESTDIR)/etc/balancer $(DESTDIR)/usr/lib/systemd/system
+install_monitor.conf: configs/monitor.conf
+	mkdir -p $(DESTDIR)/etc/balancer
+	install $< $(DESTDIR)/etc/balancer
+
+install_balancer-monitor.service: serv/balancer-monitor.service 
+	mkdir -p $(DESTDIR)/usr/lib/systemd/system
+	install $< $(DESTDIR)/usr/lib/systemd/system
+
+install_balancer-monitor: $(BIN)/balancer-monitor
+	mkdir -p $(DESTDIR)/usr/bin/
 	install $< $(DESTDIR)/usr/bin/
-	install sh/balancer-proxy.sh $(DESTDIR)/usr/bin/
-	install configs/proxy.conf $(DESTDIR)/etc/balancer
-	install serv/balancer-proxy.service $(DESTDIR)/usr/lib/systemd/system
 
-install: install_proxy install_monitor
+install_balancer-proxy.sh: sh/balancer-proxy.sh
+	mkdir -p $(DESTDIR)/usr/bin
+	install $< $(DESTDIR)/usr/bin/
+
+install_proxy.conf: configs/proxy.conf
+	mkdir -p $(DESTDIR)/etc/balancer
+	install $< $(DESTDIR)/etc/balancer
+
+install_balancer-proxy.service: serv/balancer-proxy.service 
+	mkdir -p $(DESTDIR)/usr/lib/systemd/system
+	install $< $(DESTDIR)/usr/lib/systemd/system
+
+install_balancer-proxy: $(BIN)/balancer-proxy
+	mkdir -p $(DESTDIR)/usr/bin/
+	install $< $(DESTDIR)/usr/bin/
+
+install: install_balancer-proxy install_balancer-proxy.service install_proxy.conf install_balancer-proxy.sh install_balancer-monitor install_balancer-monitor.service install_monitor.conf install_balancer-monitor.sh
 
 clean:
 	rm -rf obj/* bin/* shared/*
