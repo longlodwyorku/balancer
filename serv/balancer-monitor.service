@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 Type=exec
 Restart=always
 RestartSec=2
-ExecStart=/usr/bin/balancer/monitor.sh
+ExecStart=/usr/bin/balancer-monitor.sh
 
 [Install]
 WantedBy=multi-user.target
