@@ -1,3 +1,4 @@
 #! /bin/sh
 
-$(dirname $(realpath $0))/monitor_server < /etc/balancer/monitor.conf
+read -a args -d EOF < /etc/balancer/monitor.conf
+$(dirname $(realpath $0))/monitor_server ${args[@]}

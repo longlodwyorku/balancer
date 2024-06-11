@@ -1,3 +1,4 @@
 #! /bin/sh
 
-$(dirname $(realpath $0))/proxy_server < /etc/balancer/proxy.conf
+read -a args -d EOF < /etc/balancer/proxy.conf
+$(dirname $(realpath $0))/proxy_server ${args[@]}
