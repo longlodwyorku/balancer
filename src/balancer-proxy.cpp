@@ -110,8 +110,8 @@ void handle_broadcast(const epoll_event &ev, int index, std::vector<std::tuple<s
 
 void handle_tcp(const epoll_event &ev, worker::queue_t &fd_queue) {
   for (int client = accept4(ev.data.fd, nullptr, nullptr, SOCK_NONBLOCK); client > 0; client = accept4(ev.data.fd, nullptr, nullptr, SOCK_NONBLOCK)) {
-    if (!fd_queue.enqueue(client)) {
-      std::cerr << "failed to add " << client << std::endl;
+    while (!fd_queue.enqueue(client)) {
+      std::this_thread::yield();
     }
   }
 }

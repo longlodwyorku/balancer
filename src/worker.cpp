@@ -122,11 +122,13 @@ bool valid_timestamp(uint64_t timestamp) {
 int init_server_connection(const sockaddr_in& server) {
   int server_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (server_fd < 0) {
+    perror(nullptr);
     std::cerr << "failed to create server socket" << std::endl;
     return -1;
   }
   if (connect(server_fd, reinterpret_cast<const sockaddr*>(&server), sizeof(server)) < 0) {
     if (errno != EINPROGRESS) {
+      perror(nullptr);
       std::cerr << "failed to connect server socket" << std::endl;
       close(server_fd);
       return -1;
