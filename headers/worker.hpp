@@ -48,6 +48,11 @@ void worker::dequeue(Iter servers_begin, Iter servers_end, std::shared_mutex &sm
       return;
     }
     int server_fd = init_server_connection(std::get<0>(*server));
+    if (server_fd < 0) {
+      std::cerr << "failed to create server connection" << std::endl;
+      close(client_fd);
+      continue;
+    }
     if (epoll_add(epoll_fd, server_fd, EPOLLOUT) < 0) {
       perror(nullptr);
       std::cerr << "failed to add server socket to epoll" << std::endl;
@@ -96,7 +101,7 @@ void worker::run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm) {
       events = new epoll_event[handlers.size()];
       events_size = handlers.size();
     }
-    ssize_t n = epoll_wait(epoll_fd, events, events_size, MAX_EVENTS - fd_queue->size());
+    ssize_t n = epoll_wait(epoll_fd, events, events_size, MAX_EVENTS + 1 - fd_queue->size());
     if (n < 0) {
       perror(nullptr);
       std::cerr << "epoll_wait failed" << std::endl;
