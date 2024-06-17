@@ -2,106 +2,114 @@
 
 #include "connection.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <shared_mutex>
-#include "sync_queue.hpp"
 #include <unistd.h>
 #include <unordered_map>
 #include <functional>
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <iostream>
+#include <atomic>
 
 struct worker {
-  static constexpr size_t MAX_EVENTS = 255;
-  using queue_t = ring::sync_queue<int, MAX_EVENTS>;
-  queue_t *fd_queue;
+  static constexpr size_t MAX_EVENTS = 511;
+  static inline int max_connections = 0;
+  std::atomic_int *number_of_connections;
+  std::atomic_bool *has_connections;
   connections_manager connections;
   std::unordered_map<int, std::function<void(const epoll_event&)>> handlers;
   int epoll_fd;
 
-  worker(queue_t *fd_queue, int epoll_fd);
+  worker(std::atomic_int *number_of_connections, std::atomic_bool *has_connections, int epoll_fd);
   ~worker();
 
   template <typename Iter>
-  void run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm);
-
-  template <typename Iter>
-  void dequeue(Iter servers_begin, Iter servers_end, std::shared_mutex &sm);
-
-  void handle_server_connect(const epoll_event& ev, int client_fd);
+  void run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm, int listens_socket);
+  template<typename Iter>
+  void accept_connections(Iter servers_begin, Iter servers_end, std::shared_mutex& sm, int listens_socket);
+  void handle_server_connect(const epoll_event& ev);
   void handle_data_transfer(const epoll_event& ev);
+  void handle_preread_client(const epoll_event &ev);
+  void on_client_connect(int client_fd, const sockaddr_in &addr);
 };
 
 bool valid_timestamp(uint64_t timestamp);
 
-int init_server_connection(const sockaddr_in& addr);
-
-template <typename Iter>
-void worker::dequeue(Iter servers_begin, Iter servers_end, std::shared_mutex &sm) {
-  
-  int client_fd;
-  while (fd_queue->dequeue(client_fd)) {
-    std::shared_lock<std::shared_mutex> sl(sm);
-    Iter server = get_server(servers_begin, servers_end);
-    if (server == servers_end) {
-      close(client_fd);
-      return;
-    }
-    int server_fd = init_server_connection(std::get<0>(*server));
-    if (server_fd < 0) {
-      std::cerr << "failed to create server connection" << std::endl;
-      close(client_fd);
-      continue;
-    }
-    if (epoll_add(epoll_fd, server_fd, EPOLLOUT) < 0) {
-      perror(nullptr);
-      std::cerr << "failed to add server socket to epoll" << std::endl;
-      close(server_fd);
-      close(client_fd);
-      continue;
-    }
-    handlers[server_fd] = std::bind(&worker::handle_server_connect, this, std::placeholders::_1, client_fd);
-  }
-}
-
 template <typename Iter>
 Iter get_server(Iter begin, Iter end) {
-  Iter first_valid_time = end;
+  float s = 0;
   for (auto it = begin; it != end; ++it) {
     std::tuple<sockaddr_in, size_t, float, float> cur = *it;
     if (valid_timestamp(std::get<1>(cur))) {
-      first_valid_time = it;
-      break;
+      float cur_m = std::get<2>(cur) * std::get<3>(cur);
+      cur_m < 1 && (s += (1 - cur_m));
     }
   }
-  if (first_valid_time == end) {
-    return end;
+  float r = static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / s));
+  if (r >= s) {
+    r = s;
   }
-  Iter res = first_valid_time;
-  float m = std::get<2>(*res) + std::get<3>(*res);
-  for (auto it = first_valid_time + 1; it != end; ++it) {
+  s = 0;
+  for (auto it = begin; it != end; ++it) {
     std::tuple<sockaddr_in, size_t, float, float> cur = *it;
-    float cur_m = std::get<2>(cur) + std::get<3>(cur);
-    if (valid_timestamp(std::get<1>(cur)) && cur_m < m) {
-      res = it;
-      m = cur_m;
+    if (valid_timestamp(std::get<1>(cur))) {
+      float cur_m = std::get<2>(cur) + std::get<3>(cur);
+      if (cur_m < 1 && (s += (1 - cur_m)) >= r) {
+        return it;
+      }
     }
   }
-  return res;
+  return end;
 }
 
 template <typename Iter>
-void worker::run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm) {
+void worker::accept_connections(Iter servers_begin, Iter servers_end, std::shared_mutex& sm, int listen_socket) {
+  while (*number_of_connections < max_connections) {
+    sm.lock_shared();
+    auto server = get_server(servers_begin, servers_end);
+    sm.unlock_shared();
+    if (server == servers_end) {
+      std::cerr << "no server available" << std::endl;
+      return;
+    }
+    int client = accept4(listen_socket, nullptr, nullptr, SOCK_NONBLOCK);
+    //std::cout << "accepted " << client << std::endl;
+    if (client < 0) {
+      *has_connections = false;
+      break;
+    }
+    
+    on_client_connect(client, std::get<0>(*server));
+    //std::cout << "done on client" << std::endl;
+  }
+}
+
+template <typename Iter>
+void worker::run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm, int listen_socket) {
   epoll_event *events = new epoll_event[MAX_EVENTS];
   size_t events_size = MAX_EVENTS;
+  handlers[listen_socket] = [servers_begin, servers_end, this, &sm](const epoll_event &ev) {
+    *has_connections = true;
+    accept_connections(servers_begin, servers_end, sm, ev.data.fd);
+  };
   while (true) {
-    dequeue(servers_begin, servers_end, sm);
-    if (events_size < handlers.size()) {
-      delete[] events;
-      events = new epoll_event[handlers.size()];
-      events_size = handlers.size();
+    if (*has_connections) {
+      accept_connections(servers_begin, servers_end, sm, listen_socket);
     }
-    ssize_t n = epoll_wait(epoll_fd, events, events_size, MAX_EVENTS + 1 - fd_queue->size());
+    if (events_size < handlers.size()) {
+      epoll_event *events_new = new epoll_event[handlers.size()];
+      if (events_new == nullptr) {
+        perror(nullptr);
+        std::cerr << "failed to allocate memory" << std::endl;
+      }
+      else {
+        delete[] events;
+        events = events_new;
+        events_size = handlers.size();
+      }
+    }
+    ssize_t n = epoll_wait(epoll_fd, events, events_size, -1);
     if (n < 0) {
       perror(nullptr);
       std::cerr << "epoll_wait failed" << std::endl;
@@ -111,6 +119,8 @@ void worker::run(Iter servers_begin, Iter servers_end, std::shared_mutex& sm) {
       auto it = handlers.find(events[i].data.fd);
       if (it == handlers.end()) {
         std::cerr << "no handler for fd " << events[i].data.fd << std::endl;
+        epoll_del(epoll_fd, events[i].data.fd);
+        close(events[i].data.fd);
         continue;
       }
       it->second(events[i]);

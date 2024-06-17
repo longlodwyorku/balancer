@@ -10,11 +10,15 @@ struct connection {
   int pipes[2];
   int server;
   int client;
-  int ep;
+  uint32_t server_event;
+  uint32_t client_event;
+  int des;
 
-  void clean_up() const;
+  void clean_up(int ep) const;
   int write(int fd);
-  int read(int fd);
+  int read(int fd, size_t buffer_size);
+  int get_peer(int fd) const;
+  uint32_t *get_event(int fd);
 };
 
 class connections_manager {

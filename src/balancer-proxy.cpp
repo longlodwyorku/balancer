@@ -1,20 +1,12 @@
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <endian.h>
-#include <fcntl.h>
 #include <arpa/inet.h>
-#include <cstdlib>
-#include <fcntl.h>
+#include <atomic>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <mutex>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <unordered_map>
 #include "../headers/defer.hpp"
 #include "../headers/worker.hpp"
@@ -54,7 +46,7 @@ int init_broadcast_listen(int ep, const char *address, uint16_t port) {
   return broadcast_socket;
 }
 
-int init_tcp_listen(int ep, const char *address, uint16_t port, int max_connections) {
+int init_tcp_listen(const char *address, uint16_t port, int max_connections) {
   int listen_socket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (listen_socket < 0) {
     perror(nullptr);
@@ -73,11 +65,6 @@ int init_tcp_listen(int ep, const char *address, uint16_t port, int max_connecti
   }
 
   if (listen(listen_socket, max_connections) < 0) {
-    perror(nullptr);
-    close(listen_socket);
-    return -1;
-  }
-  if (epoll_add(ep, listen_socket, EPOLLET | EPOLLIN) < 0) {
     perror(nullptr);
     close(listen_socket);
     return -1;
@@ -106,19 +93,13 @@ void handle_broadcast(const epoll_event &ev, int index, std::vector<std::tuple<s
   timestamp = endian_convert::ntoh(*reinterpret_cast<size_t*>(buf + 1));
   cpu = endian_convert::ntoh(*reinterpret_cast<float*>(buf + 1 + sizeof(size_t)));
   mem = endian_convert::ntoh(*reinterpret_cast<float*>(buf + 1 + sizeof(size_t) + sizeof(float)));
-}
-
-void handle_tcp(const epoll_event &ev, worker::queue_t &fd_queue) {
-  for (int client = accept4(ev.data.fd, nullptr, nullptr, SOCK_NONBLOCK); client > 0; client = accept4(ev.data.fd, nullptr, nullptr, SOCK_NONBLOCK)) {
-    while (!fd_queue.enqueue(client)) {
-      std::this_thread::yield();
-    }
-  }
+  std::cout << "server ID: " << index << " time: " << timestamp << " CPU: " << cpu << " mem: " << mem << std::endl;
 }
 
 int main (int argc, char *argv[]) {
   if (argc < 4 || argc % 4) {
     std::cerr << "incorrect number of argument" << std::endl << "proxy_server <max number of connections> <listen address> <listen port> [<server address> <server port> <server monitor address> <server monitor port>]..." << std::endl;
+    return 1;
   }
   int max_connections = atoi(argv[1]);
   const char *listen_addr = argv[2];
@@ -140,7 +121,8 @@ int main (int argc, char *argv[]) {
   auto counts = std::thread::hardware_concurrency();
   workers.reserve(counts);
   std::vector<std::thread> threads;
-  worker::queue_t fd_queue;
+  std::atomic_int number_of_connections = 0;
+  std::atomic_bool has_connections = false;
 
   for (size_t k = 0; k < counts; ++k) {
     int worker_epoll_fd = epoll_create1(0);
@@ -149,7 +131,7 @@ int main (int argc, char *argv[]) {
       std::cerr << "failed to create worker epoll_fd" << std::endl;
       return 1;
     }
-    workers.emplace_back(&fd_queue, worker_epoll_fd);
+    workers.emplace_back(&number_of_connections, &has_connections, worker_epoll_fd);
   }
 
   int epoll_fd = epoll_create1(0);
@@ -179,31 +161,46 @@ int main (int argc, char *argv[]) {
   }
   defer(close_all(broadcast_sockets));
 
-  int listen_socket = init_tcp_listen(epoll_fd, listen_addr, listen_port, max_connections);
+  int listen_socket = init_tcp_listen(listen_addr, listen_port, max_connections);
   if (listen_socket < 0) {
     std::cerr << "failed to create listen socket" << std::endl;
     return 1;
   }
   defer(close(listen_socket));
 
-  router[listen_socket] = std::bind(&handle_tcp, std::placeholders::_1, std::ref(fd_queue));
-
-  epoll_event *events = new epoll_event[servers_num + 1];
+  epoll_event *events = new epoll_event[servers_num];
   defer(delete[] events);
+
   for (size_t k = 0; k < counts; ++k) {
-    threads.emplace_back([&workers, k, &servers, &sm] {
-      workers[k].run(servers.begin(), servers.end(), sm);
+    if (epoll_add(workers[k].epoll_fd, listen_socket, EPOLLET | EPOLLIN | EPOLLEXCLUSIVE) < 0) {
+      perror(nullptr);
+      std::cerr << "failed to add listen_socket to workers' epoll" << std::endl;
+      return 1;
+    }
+  }
+  worker::max_connections = max_connections;
+
+  for (size_t k = 0; k < counts; ++k) {
+    threads.emplace_back([&workers, k, &servers, &sm, listen_socket] {
+      workers[k].run(servers.begin(), servers.end(), sm, listen_socket);
     });
   }
 
   while (true) {
-    int n = epoll_wait(epoll_fd, events, servers_num + 1, -1);
+    int n = epoll_wait(epoll_fd, events, servers_num, -1);
     for (int k = 0; k < n; ++k) {
       router[events[k].data.fd](events[k]);
     }
+/*    std::cout << "connections: " << number_of_connections << " ";
+    for (size_t k = 0 ; k < workers.size(); ++k) {
+      std::cout << "worker " << k << ": " << workers[k].handlers.size() << " fds" << " ";
+    }
+    std::cout << std::endl;
+*/    
   }
   for (auto &t : threads) {
     t.join();
   }
+  std::cout << "Exitting" << std::endl;
   return 0;
 }

@@ -23,7 +23,7 @@ $(OBJ)/connection.o: src/connection.cpp headers/connection.hpp
 	mkdir -p obj
 	$(CC) $(FLAGS) -c -o $@ $<
 
-$(OBJ)/worker.o: src/worker.cpp headers/worker.hpp headers/sync_queue.hpp headers/connection.hpp
+$(OBJ)/worker.o: src/worker.cpp headers/worker.hpp headers/connection.hpp
 	mkdir -p obj
 	$(CC) $(FLAGS) -c -o $@ $<
 

@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 #include <endian.h>
@@ -43,12 +44,28 @@ int main (int argc, char *argv[]) {
     std::cerr << "failed to connect to broadcast address" << std::endl;
     return 1;
   }
+  std::pair<uint64_t, uint64_t> cpu0;
+  if (monitor::sample_cpu_usage(cpu0) != 0) {
+    perror(nullptr);
+    std::cerr << "failed to get cpu sample" << std::endl;
+    return 1;
+  }
+  std::this_thread::sleep_for(std::chrono::seconds(1));
 
   while (true) {
-    float cpu_usage = monitor::get_cpu_usage();
-    float mem_usage = monitor::get_memory_usage();
     auto current_time = std::chrono::system_clock::now();
     uint64_t current_time_uint64 = std::chrono::duration_cast<std::chrono::seconds>(current_time.time_since_epoch()).count();
+
+    std::pair<uint64_t, uint64_t> cpu1;
+    if (monitor::sample_cpu_usage(cpu1) != 0) {
+      perror(nullptr);
+      std::cerr << "failed to get cpu sample" << std::endl;
+      continue;
+    }
+    uint64_t cpu_total = cpu1.second - cpu0.second;
+
+    float cpu_usage = cpu_total == 0 ? 0 : (((double)(cpu1.first - cpu0.first)) / cpu_total);
+    float mem_usage = monitor::get_memory_usage();
     unsigned char buf[MES_SIZE];
     buf[0] = 0;
     *reinterpret_cast<uint64_t*>((buf + 1)) = endian_convert::hton(current_time_uint64);
@@ -56,9 +73,11 @@ int main (int argc, char *argv[]) {
     *reinterpret_cast<float*>((buf + 1 + sizeof(uint64_t) + sizeof(float))) = endian_convert::hton(mem_usage);
 
     if (send(broadcast_socket, buf, MES_SIZE, 0) != MES_SIZE) {
+      perror(nullptr);
       std::cerr << "failed to sendto" << std::endl;
     }
-//    std::cout << current_time_uint64 << "\t" << cpu_usage << "\t" << mem_usage << std::endl;
+    cpu0 = cpu1;
+    std::cout << current_time_uint64 << "\t" << cpu_usage << "\t" << mem_usage << std::endl;
     std::this_thread::sleep_until(current_time + std::chrono::seconds(1));
   }
   return 0;
