@@ -42,14 +42,14 @@ static void write_to(std::unordered_map<int, std::function<void(const epoll_even
       }
     }
     //std::cout << "write " << n << " to " << fd << std::endl;
-    if (n == 0) {
+/*    if (n == 0) {
       std::cerr << "write 0 to " << fd << std::endl;
       handlers.erase(conn->client);
       handlers.erase(conn->server);
       connections.remove(fd);
       (*number_of_connections)--;
-    }
-    if (conn->bytes_in_pipe) {
+    }*/
+    if (conn->bytes_in_pipe || n == 0) {
       return;
     }
     if (*peer_events & EPOLLIN) {
@@ -159,13 +159,13 @@ static void read_from(std::unordered_map<int, std::function<void(const epoll_eve
         }
       }
       //std::cout << "write " << n << " from " << peer << std::endl;
-      if (n == 0) {
+      /*if (n == 0) {
         std::cerr << "write 0 to " << fd << std::endl;
         handlers.erase(conn->client);
         handlers.erase(conn->server);
         connections.remove(fd);
         (*number_of_connections)--;
-      }
+      }*/
     }
   }
 }
